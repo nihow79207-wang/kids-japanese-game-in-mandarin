@@ -1,0 +1,7 @@
+{
+  "name": "日文一起學 - Kids Japanese Learning Game",
+  "description": "An interactive Japanese learning game for children featuring Hiragana learning, listening quizzes, and writing practice with a rewarding pun-filled story.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
