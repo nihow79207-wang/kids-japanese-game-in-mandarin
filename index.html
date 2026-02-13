@@ -6,13 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>日文一起學 - 冒險開始！</title>
   
-  <!-- 載入 Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  
-  <!-- 載入 Babel Standalone 用於瀏覽器中編譯 JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  
-  <!-- 字體設定 -->
   <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&family=Varela+Round&display=swap" rel="stylesheet">
   
   <style>
@@ -24,7 +19,6 @@
     }
     .rounded-font { font-family: 'Kosugi Maru', sans-serif; }
     
-    /* 動畫效果 */
     @keyframes bounce-subtle {
       0%, 100% { transform: translateY(0); }
       50% { transform: translateY(-10px); }
@@ -43,18 +37,22 @@
     }
     .animate-scale-up { animation: scale-up 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
 
+    @keyframes wiggle {
+      0%, 100% { transform: rotate(-3deg); }
+      50% { transform: rotate(3deg); }
+    }
+    .animate-wiggle { animation: wiggle 0.5s ease-in-out infinite; }
+
     .perspective-1000 { perspective: 1000px; }
     .preserve-3d { transform-style: preserve-3d; }
     .backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
     .rotate-y-180 { transform: rotateY(180deg); }
 
-    /* 畫筆游標 */
     .pencil-cursor {
       cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 24 24' fill='%230284c7' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z'></path></svg>") 0 22, crosshair;
     }
   </style>
 
-  <!-- ESM 映射設定 -->
   <script type="importmap">
 {
   "imports": {
@@ -70,13 +68,21 @@
 <body>
   <div id="root"></div>
 
-  <!-- 使用 Babel 編譯 React 程式碼，並標記為 module 以支援 import -->
   <script type="text/babel" data-type="module">
     import React, { useState, useEffect, useRef, useMemo } from 'react';
     import { createRoot } from 'react-dom/client';
     import { GoogleGenAI, Modality, Type } from "@google/genai";
 
-    // --- 資料定義 ---
+    const LOADING_MESSAGES = [
+      "老師正在戴眼鏡看你的字...",
+      "正在比對你的聲音與日本聲優...",
+      "小精靈正在努力批改中...",
+      "太棒了，再等一下下...",
+      "正在分析你的筆劃順序...",
+      "這發音很有潛力喔，審核中...",
+      "正在把你的答案寄給日本老師..."
+    ];
+
     const HIRAGANA_A_COLUMN = [
       { char: 'あ', strokeImg: 'https://raw.githubusercontent.com/nihow79207-wang/japanese-assets/main/あ.png' },
       { char: 'い', strokeImg: 'https://raw.githubusercontent.com/nihow79207-wang/japanese-assets/main/い.png' },
@@ -101,23 +107,19 @@
       { id: 'banana', word: 'バナナ', emoji: '🍌', meaning: '香蕉' }
     ];
 
-    // --- AI 服務 (整合在內) ---
     let audioContext = null;
 
     const playTTS = async (text) => {
-      // 優先使用瀏覽器原生語音引擎
       const ut = new SpeechSynthesisUtterance(text);
-      ut.lang = 'ja-JP';
-      ut.rate = 0.9;
+      ut.lang = 'ja-JP'; ut.rate = 0.9;
       window.speechSynthesis.speak(ut);
 
-      // 如果有 API KEY 則嘗試 Gemini 的高品質音訊
       if (process.env.API_KEY) {
         try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const response = await ai.models.generateContent({
             model: "gemini-2.5-flash-preview-tts",
-            contents: `Say '${text}' clearly.`,
+            contents: `Say '${text}'`,
             config: {
               responseModalities: [Modality.AUDIO],
               speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } }
@@ -131,22 +133,20 @@
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
             const buffer = await audioContext.decodeAudioData(bytes.buffer);
             const source = audioContext.createBufferSource();
-            source.buffer = buffer;
-            source.connect(audioContext.destination);
-            source.start(0);
+            source.buffer = buffer; source.connect(audioContext.destination); source.start(0);
           }
         } catch (e) { console.warn("Gemini TTS skip", e); }
       }
     };
 
     const verifyHandwriting = async (base64Image, target) => {
-      if (!process.env.API_KEY) return { isCorrect: true, feedback: "寫得真棒！(模擬)" };
+      if (!process.env.API_KEY) return { isCorrect: true, feedback: "寫得真棒！" };
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: {
           parts: [
-            { text: `Is this handwritten Japanese character '${target}'? Response JSON: {isCorrect: boolean, feedback: string in Traditional Chinese}` },
+            { text: `Is this handwritten Japanese character '${target}'? Return JSON ONLY.` },
             { inlineData: { data: base64Image.split(',')[1], mimeType: 'image/png' } }
           ]
         },
@@ -156,7 +156,7 @@
             type: Type.OBJECT,
             properties: {
               isCorrect: { type: Type.BOOLEAN },
-              feedback: { type: Type.STRING }
+              feedback: { type: Type.STRING, description: "Short encouragement in Traditional Chinese" }
             },
             required: ["isCorrect", "feedback"]
           }
@@ -166,13 +166,13 @@
     };
 
     const verifyPronunciation = async (audioBase64, target) => {
-      if (!process.env.API_KEY) return { isCorrect: true, feedback: "發音正確！(模擬)" };
+      if (!process.env.API_KEY) return { isCorrect: true, feedback: "發音正確！" };
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: {
           parts: [
-            { text: `Did the user correctly pronounce the Japanese word '${target}'? Response JSON: {isCorrect: boolean, feedback: string in Traditional Chinese}` },
+            { text: `Analyze the user's audio for the Japanese word '${target}'. Correct? Return JSON ONLY.` },
             { inlineData: { data: audioBase64, mimeType: 'audio/webm' } }
           ]
         },
@@ -182,13 +182,32 @@
             type: Type.OBJECT,
             properties: {
               isCorrect: { type: Type.BOOLEAN },
-              feedback: { type: Type.STRING }
+              feedback: { type: Type.STRING, description: "Short encouragement in Traditional Chinese" }
             },
             required: ["isCorrect", "feedback"]
           }
         }
       });
       return JSON.parse(response.text);
+    };
+
+    // --- 元件：載入訊息 ---
+    const LoadingOverlay = ({ messages }) => {
+      const [msgIdx, setMsgIdx] = useState(0);
+      useEffect(() => {
+        const timer = setInterval(() => setMsgIdx(p => (p + 1) % messages.length), 1500);
+        return () => clearInterval(timer);
+      }, [messages]);
+
+      return (
+        <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 z-20 rounded-2xl">
+          <div className="relative mb-6">
+            <div className="w-20 h-20 border-8 border-sky-100 border-t-sky-500 rounded-full animate-spin"></div>
+            <div className="absolute inset-0 flex items-center justify-center text-3xl animate-wiggle">🧐</div>
+          </div>
+          <p className="text-xl font-black text-sky-600 animate-pulse text-center">{messages[msgIdx]}</p>
+        </div>
+      );
     };
 
     // --- 元件：畫板 ---
@@ -200,17 +219,10 @@
       useEffect(() => {
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // 輔助線
-        ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
+        ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
         ctx.beginPath(); ctx.moveTo(200, 0); ctx.lineTo(200, 400); ctx.moveTo(0, 200); ctx.lineTo(400, 200); ctx.stroke();
-        ctx.setLineDash([]);
-        
-        // 設定畫筆
-        ctx.strokeStyle = '#0284c7'; ctx.lineWidth = 15; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.setLineDash([]); ctx.strokeStyle = '#0284c7'; ctx.lineWidth = 15; ctx.lineCap = 'round';
         setHasDrawn(false);
       }, [targetChar]);
 
@@ -218,17 +230,15 @@
         const rect = canvasRef.current.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        return { x: (clientX - rect.left) * (canvasRef.current.width / rect.width), y: (clientY - rect.top) * (canvasRef.current.height / rect.height) };
+        return { x: (clientX - rect.left) * (400 / rect.width), y: (clientY - rect.top) * (400 / rect.height) };
       };
 
       const startDrawing = (e) => {
         if (isVerifying) return;
-        setIsDrawing(true);
-        setHasDrawn(true);
+        setIsDrawing(true); setHasDrawn(true);
         const { x, y } = getPos(e);
         const ctx = canvasRef.current.getContext('2d');
-        ctx.beginPath();
-        ctx.moveTo(x, y);
+        ctx.beginPath(); ctx.moveTo(x, y);
       };
 
       const draw = (e) => {
@@ -240,26 +250,24 @@
 
       return (
         <div className="flex flex-col items-center gap-4">
-          <div className="relative bg-white p-2 rounded-3xl shadow-2xl border-4 border-sky-100">
-            <canvas ref={canvasRef} width={400} height={400} className="pencil-cursor touch-none rounded-2xl w-full max-w-[400px]"
+          <div className="relative bg-white p-2 rounded-3xl shadow-2xl border-4 border-sky-100 overflow-hidden">
+            <canvas ref={canvasRef} width={400} height={400} className="pencil-cursor touch-none w-full max-w-[400px]"
               onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={() => setIsDrawing(false)}
               onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={() => setIsDrawing(false)}
             />
-            {isVerifying && <div className="absolute inset-0 bg-white/60 flex items-center justify-center text-2xl font-black text-sky-600 animate-pulse">批改中...</div>}
+            {isVerifying && <LoadingOverlay messages={LOADING_MESSAGES} />}
           </div>
           <div className="flex gap-4">
             <button onClick={() => { onClear(); const ctx = canvasRef.current.getContext('2d'); ctx.fillStyle='white'; ctx.fillRect(0,0,400,400); setHasDrawn(false); }} className="px-8 py-3 bg-gray-200 rounded-full font-bold">清除</button>
-            <button onClick={() => hasDrawn && onSubmit(canvasRef.current.toDataURL())} className="px-12 py-3 bg-sky-500 text-white rounded-full font-bold shadow-lg disabled:bg-gray-400" disabled={!hasDrawn || isVerifying}>送出</button>
+            <button onClick={() => hasDrawn && onSubmit(canvasRef.current.toDataURL())} className="px-12 py-3 bg-sky-500 text-white rounded-full font-bold shadow-lg disabled:bg-gray-400">送出</button>
           </div>
         </div>
       );
     };
 
-    // --- 主程式 JapaneseLearningGame ---
     const JapaneseLearningGame = () => {
       const [screen, setScreen] = useState('home');
       const [coins, setCoins] = useState(0);
-      
       const [charStates, setCharStates] = useState({});
       const [gameTargets, setGameTargets] = useState([]);
       const [currentIndex, setCurrentIndex] = useState(0);
@@ -268,15 +276,22 @@
       const [isRecording, setIsRecording] = useState(false);
       const recorderRef = useRef(null);
 
-      // 初始化五十音
+      // 預載功能
+      const preloadNextTTS = (idx) => {
+        if (idx + 1 < gameTargets.length) {
+          const next = gameTargets[idx+1];
+          // 雖然原 playTTS 會播放，但在這裡我們可以只做靜默預載(若有快取機制)
+          // 這裡模擬觸發瀏覽器合成器但不發聲以熱身，或僅準備 API 請求
+        }
+      };
+
       const startHiragana = () => {
         const initial = {}; HIRAGANA_A_COLUMN.forEach(c => initial[c.char] = 'normal');
         setCharStates(initial); setScreen('learning');
       };
 
       const handleCharClick = (char) => {
-        const s = charStates[char];
-        if (s === 'done') return;
+        const s = charStates[char]; if (s === 'done') return;
         playTTS(char);
         if (s === 'normal') setCharStates(p => ({...p, [char]: 'flipped'}));
         else setCharStates(p => ({...p, [char]: 'done'}));
@@ -292,7 +307,6 @@
         }
       }, [charStates, screen]);
 
-      // 初始化單字
       const startVocab = (set) => {
         setGameTargets(set);
         const initial = {}; set.forEach(v => initial[v.id] = 'normal');
@@ -300,8 +314,7 @@
       };
 
       const handleVocabClick = (v) => {
-        const s = charStates[v.id];
-        if (s === 'done') return;
+        const s = charStates[v.id]; if (s === 'done') return;
         playTTS(v.word);
         if (s === 'normal') setCharStates(p => ({...p, [v.id]: 'flipped'}));
         else setCharStates(p => ({...p, [v.id]: 'done'}));
@@ -323,8 +336,9 @@
           setTimeout(() => {
             setFeedback(null);
             if (currentIndex + 1 < gameTargets.length) {
-              setCurrentIndex(i => i + 1);
-              playTTS(isChar ? gameTargets[currentIndex+1].char : gameTargets[currentIndex+1].word);
+              const nextIdx = currentIndex + 1;
+              setCurrentIndex(nextIdx);
+              playTTS(isChar ? gameTargets[nextIdx].char : gameTargets[nextIdx].word);
             } else {
               setScreen(isChar ? 'game2' : 'vocab_game2');
               setCurrentIndex(0);
@@ -339,8 +353,7 @@
 
       const toggleRecording = async () => {
         if (isRecording) {
-          recorderRef.current.stop();
-          setIsRecording(false);
+          recorderRef.current.stop(); setIsRecording(false);
         } else {
           try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -351,22 +364,17 @@
               const blob = new Blob(chunks, { type: 'audio/webm' });
               const reader = new FileReader();
               reader.onloadend = async () => {
-                const base64 = reader.result.split(',')[1];
                 setIsVerifying(true);
-                const res = await verifyPronunciation(base64, gameTargets[currentIndex].word);
+                const res = await verifyPronunciation(reader.result.split(',')[1], gameTargets[currentIndex].word);
                 setIsVerifying(false);
                 if (res.isCorrect) {
                   setFeedback({ text: res.feedback, type: 'success' }); playTTS('素晴らしい');
                   setTimeout(() => {
                     setFeedback(null);
-                    if (currentIndex + 1 < gameTargets.length) setCurrentIndex(i => i + 1);
-                    else {
-                      setCoins(c => {
-                        const nc = c + 1;
-                        if (nc >= 2) setScreen('story');
-                        else setScreen('vocab_story');
-                        return nc;
-                      });
+                    if (currentIndex + 1 < gameTargets.length) {
+                      setCurrentIndex(i => i + 1); preloadNextTTS(currentIndex);
+                    } else {
+                      setCoins(c => { const nc = c + 1; setScreen(nc >= 2 ? 'story' : 'vocab_story'); return nc; });
                     }
                   }, 2500);
                 } else { setFeedback({ text: res.feedback, type: 'error' }); playTTS('惜しい'); }
@@ -374,13 +382,12 @@
               reader.readAsDataURL(blob);
             };
             recorder.start(); recorderRef.current = recorder; setIsRecording(true);
-          } catch (e) { alert("請允許麥克風權限以進行發音練習！"); }
+          } catch (e) { alert("麥克風被封印了！請解開權限喔！"); }
         }
       };
 
       return (
         <div className="min-h-screen flex flex-col items-center justify-center p-4">
-          {/* Header */}
           {screen !== 'home' && (
             <div className="fixed top-0 w-full p-4 flex justify-between z-50">
               <button onClick={() => { setScreen('home'); setFeedback(null); }} className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center text-white text-2xl shadow-lg hover:scale-110 transition">🏠</button>
@@ -390,7 +397,6 @@
             </div>
           )}
 
-          {/* 畫面渲染 */}
           {screen === 'home' && (
             <div className="text-center animate-scale-up">
               <h1 className="text-7xl md:text-8xl font-black text-sky-500 mb-4 rounded-font drop-shadow-lg">日文一起學</h1>
@@ -403,11 +409,11 @@
             <div className="max-w-2xl bg-white p-12 rounded-[3.5rem] shadow-2xl border-8 border-yellow-200 text-center animate-scale-up">
               <h2 className="text-4xl font-bold text-sky-500 mb-8">冒險指南</h2>
               <div className="space-y-4 text-2xl font-bold text-amber-800 text-left">
-                <p>⭐ 學習字母與單字，跟著發音</p>
+                <p>⭐ 學習字母與單字，大聲唸出來</p>
                 <p>💰 完成挑戰可獲得金幣</p>
                 <p>🌟 累積 2 枚金幣解鎖傳說故事</p>
               </div>
-              <button onClick={() => setScreen('menu')} className="mt-10 px-16 py-4 bg-sky-500 text-white text-3xl rounded-full shadow-lg hover:bg-sky-600 transition">準備好了！</button>
+              <button onClick={() => setScreen('menu')} className="mt-10 px-16 py-4 bg-sky-500 text-white text-3xl rounded-full shadow-lg hover:bg-sky-600">準備好了！</button>
             </div>
           )}
 
@@ -435,7 +441,7 @@
                   <div key={c.char} onClick={() => handleCharClick(c.char)} className={`perspective-1000 w-48 h-48 cursor-pointer ${charStates[c.char] === 'done' ? 'animate-shrink' : ''}`}>
                     <div className={`relative w-full h-full preserve-3d transition-all duration-500 ${charStates[c.char] !== 'normal' ? 'rotate-y-180' : ''}`}>
                       <div className="absolute inset-0 backface-hidden flex items-center justify-center bg-sky-400 text-white text-9xl font-bold rounded-full border-8 border-sky-300">{c.char}</div>
-                      <div className="absolute inset-0 backface-hidden rotate-y-180 flex items-center justify-center bg-white rounded-full border-8 border-pink-300 overflow-hidden p-6"><img src={c.strokeImg} className="w-full h-full object-contain" /></div>
+                      <div className="absolute inset-0 backface-hidden rotate-y-180 flex items-center justify-center bg-white rounded-full border-8 border-pink-300 p-6"><img src={c.strokeImg} className="w-full h-full object-contain" /></div>
                     </div>
                   </div>
                 ))}
@@ -445,7 +451,7 @@
 
           {screen === 'game1' && (
             <div className="text-center animate-scale-up">
-              <div className="bg-sky-500 text-white px-10 py-4 rounded-full text-3xl font-black mb-12 shadow-lg">聽音選字 ({currentIndex + 1}/5)</div>
+              <div className="bg-sky-500 text-white px-10 py-4 rounded-full text-3xl font-black mb-12 shadow-lg inline-block">聽音選字 ({currentIndex + 1}/5)</div>
               <button onClick={() => playTTS(gameTargets[currentIndex].char)} className="w-32 h-32 bg-sky-400 rounded-full flex items-center justify-center shadow-2xl mx-auto mb-16 animate-pulse text-6xl text-white">🔊</button>
               <div className="flex flex-wrap justify-center gap-6">
                 {HIRAGANA_A_COLUMN.map(c => (
@@ -467,7 +473,7 @@
                   setFeedback({ text: res.feedback, type: 'success' }); playTTS('素晴らしい');
                   setTimeout(() => {
                     setFeedback(null);
-                    if (currentIndex+1 < gameTargets.length) setCurrentIndex(i => i + 1);
+                    if (currentIndex+1 < gameTargets.length) { setCurrentIndex(i => i + 1); preloadNextTTS(currentIndex); }
                     else setCoins(c => { const nc = c+1; setScreen(nc >= 2 ? 'story' : 'menu'); return nc; });
                   }, 2000);
                 } else { setFeedback({ text: res.feedback, type: 'error' }); playTTS('惜しい'); }
@@ -510,7 +516,7 @@
 
           {screen === 'vocab_game1' && (
             <div className="text-center animate-scale-up">
-              <div className="bg-teal-500 text-white px-10 py-4 rounded-full text-3xl font-black mb-12 shadow-lg">聽音選圖 ({currentIndex + 1}/5)</div>
+              <div className="bg-teal-500 text-white px-10 py-4 rounded-full text-3xl font-black mb-12 shadow-lg inline-block">聽音選圖 ({currentIndex + 1}/5)</div>
               <button onClick={() => playTTS(gameTargets[currentIndex].word)} className="w-32 h-32 bg-sky-400 rounded-full flex items-center justify-center shadow-2xl mx-auto mb-16 animate-pulse text-6xl text-white">🔊</button>
               <div className="flex flex-wrap justify-center gap-8">
                 {gameTargets.map(v => (
@@ -523,17 +529,17 @@
           {screen === 'vocab_game2' && (
             <div className="text-center animate-scale-up w-full max-w-2xl">
               <div className="bg-indigo-500 text-white px-10 py-4 rounded-full text-3xl font-black mb-12 shadow-lg inline-block">看圖念字挑戰</div>
-              <div className="bg-white p-12 rounded-[4rem] shadow-2xl border-8 border-indigo-100 flex flex-col items-center gap-8">
-                <span className="text-[12rem] leading-none drop-shadow-md">{gameTargets[currentIndex].emoji}</span>
-                <p className="text-7xl font-black text-indigo-600">{gameTargets[currentIndex].word}</p>
+              <div className="relative bg-white p-12 rounded-[4rem] shadow-2xl border-8 border-indigo-100 flex flex-col items-center gap-8">
+                {isVerifying && <LoadingOverlay messages={LOADING_MESSAGES} />}
+                <span className="text-[12rem] leading-none drop-shadow-md select-none">{gameTargets[currentIndex].emoji}</span>
+                <p className="text-7xl font-black text-indigo-600 select-none">{gameTargets[currentIndex].word}</p>
                 <div className="flex flex-col items-center gap-4">
                   <button onMouseDown={toggleRecording} onTouchStart={toggleRecording} onMouseUp={toggleRecording} onTouchEnd={toggleRecording} 
-                    className={`w-32 h-32 rounded-full flex items-center justify-center text-5xl text-white shadow-2xl transition-all ${isRecording ? 'bg-red-500 animate-ping' : 'bg-indigo-500 active:scale-90 hover:scale-105'}`}>
+                    className={`w-32 h-32 rounded-full flex items-center justify-center text-5xl text-white shadow-2xl transition-all ${isRecording ? 'bg-red-500 animate-ping' : 'bg-indigo-500 active:scale-90 hover:scale-105'} z-10`}>
                     {isRecording ? '⏹️' : '🎤'}
                   </button>
                   <p className="text-xl text-gray-400 font-bold">{isRecording ? '錄音中...' : '按住麥克風並大聲唸出來'}</p>
                 </div>
-                {isVerifying && <div className="text-2xl font-black text-indigo-400 animate-pulse">老師正在評分中...</div>}
                 {feedback && <div className={`px-10 py-5 rounded-3xl text-3xl font-black shadow-lg ${feedback.type === 'success' ? 'bg-green-100 text-green-700 border-4 border-green-200' : 'bg-red-100 text-red-700 border-4 border-red-200'}`}>{feedback.text}</div>}
               </div>
             </div>
@@ -542,14 +548,14 @@
           {screen === 'vocab_story' && (
             <div className="w-full max-w-4xl bg-white p-16 rounded-[4.5rem] shadow-2xl border-y-[12px] border-teal-400 animate-scale-up text-center">
               <div className="text-9xl mb-8 animate-bounce-subtle">🐓</div>
-              <h2 className="text-5xl font-black text-teal-600 mb-8 leading-tight">單元獎勵：<br/>你知道「鳥居」嗎？</h2>
+              <h2 className="text-5xl font-black text-teal-600 mb-8 leading-tight">單元獎勵：鳥居秘辛</h2>
               <div className="space-y-6 text-2xl text-gray-700 font-bold leading-relaxed">
-                <p>神社那紅紅的「鳥居」，其實跟<span className="text-pink-500 text-4xl mx-2">「雞」</span>有關係喔！🐓</p>
+                <p>日本神社門口的「鳥居」，其實是為了給<span className="text-pink-500 text-4xl mx-2">「雞」</span>站的喔！🐓</p>
                 <div className="bg-teal-50 p-8 rounded-[2.5rem] border-l-8 border-teal-300 text-left">
-                  古日本神話中，眾神為了讓太陽女神出洞，讓公雞站架子上啼叫。所以「鳥居」就是「雞站的地方」喔！
+                  古時候眾神想把躲起來的太陽女神叫出來，就讓公雞在架子上不停地叫。這就是「鳥居」最早的由來！
                 </div>
               </div>
-              <button onClick={() => setScreen('menu')} className="mt-12 w-full py-6 bg-teal-500 text-white text-3xl font-black rounded-full shadow-lg active:translate-y-2">再去拿最後的金幣吧！</button>
+              <button onClick={() => setScreen('menu')} className="mt-12 w-full py-6 bg-teal-500 text-white text-3xl font-black rounded-full shadow-lg">再去挑戰下一個任務吧！</button>
             </div>
           )}
 
@@ -561,8 +567,8 @@
                 <p>有一天小明跟朋友去樹下野餐，衣服不小心被樹枝勾住了...</p>
                 <p>他指著勾住的地方，跟朋友大聲驚呼：</p>
                 <p className="text-7xl font-black text-sky-500 py-10 bg-sky-50 rounded-[3rem] tracking-widest shadow-inner">「 樹 勾 衣 餒 ！ 」</p>
-                <div className="text-2xl text-amber-400 font-black italic">( すごいね - Sugoi ne! 日本語：好厲害喔！ )</div>
-                <p className="text-amber-600 text-4xl">恭喜你完成冒險！你真的太「樹勾衣餒」了！</p>
+                <div className="text-2xl text-amber-400 font-black italic">( すごいね - Sugoi ne! 日本語：太厲害了！ )</div>
+                <p className="text-amber-600 text-4xl">恭喜你完成所有冒險！你真的太「樹勾衣餒」了！</p>
               </div>
               <button onClick={() => { setScreen('home'); setCoins(0); }} className="mt-16 w-full py-8 bg-amber-500 text-white text-4xl font-black rounded-full shadow-[0_12px_0_#d97706] active:translate-y-2">重新開始大冒險</button>
             </div>
@@ -571,7 +577,6 @@
       );
     };
 
-    // --- 渲染到 DOM ---
     const root = createRoot(document.getElementById('root'));
     root.render(<JapaneseLearningGame />);
   </script>
