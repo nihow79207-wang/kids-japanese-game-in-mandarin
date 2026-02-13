@@ -4,61 +4,533 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>日文一起學</title>
+  <title>日文一起學 - 冒險開始！</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&family=Varela+Round&display=swap" rel="stylesheet">
   <style>
     body {
       font-family: 'Varela Round', 'Kosugi Maru', sans-serif;
+      background-color: #fffbeb;
       overflow-x: hidden;
     }
-    .rounded-font {
-      font-family: 'Kosugi Maru', sans-serif;
-    }
+    .rounded-font { font-family: 'Kosugi Maru', sans-serif; }
+    
+    /* 動畫效果 */
     @keyframes bounce-subtle {
       0%, 100% { transform: translateY(0); }
       50% { transform: translateY(-10px); }
     }
-    .animate-bounce-subtle {
-      animation: bounce-subtle 2s ease-in-out infinite;
-    }
+    .animate-bounce-subtle { animation: bounce-subtle 2s ease-in-out infinite; }
+    
     @keyframes shrink-disappear {
       0% { transform: scale(1); opacity: 1; }
       100% { transform: scale(0); opacity: 0; }
     }
-    .animate-shrink {
-      animation: shrink-disappear 0.5s forwards;
+    .animate-shrink { animation: shrink-disappear 0.5s forwards; }
+
+    @keyframes scale-up {
+      0% { transform: scale(0.8); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
     }
-    .perspective-1000 {
-      perspective: 1000px;
-    }
-    .rotate-y-180 {
-      transform: rotateY(180deg);
-    }
-    .backface-hidden {
-      backface-visibility: hidden;
-      -webkit-backface-visibility: hidden;
-    }
-    .preserve-3d {
-      transform-style: preserve-3d;
-    }
-    /* 自定義畫筆游標 */
+    .animate-scale-up { animation: scale-up 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+
+    .perspective-1000 { perspective: 1000px; }
+    .preserve-3d { transform-style: preserve-3d; }
+    .backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+    .rotate-y-180 { transform: rotateY(180deg); }
+
+    /* 畫筆游標 */
     .pencil-cursor {
       cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 24 24' fill='%230284c7' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z'></path></svg>") 0 22, crosshair;
     }
   </style>
-<script type="importmap">
+  <script type="importmap">
 {
   "imports": {
-    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "react/": "https://esm.sh/react@^19.2.4/",
-    "react": "https://esm.sh/react@^19.2.4"
+    "react": "https://esm.sh/react@19.0.0",
+    "react-dom": "https://esm.sh/react-dom@19.0.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+    "@google/genai": "https://esm.sh/@google/genai@1.40.0",
+    "react/": "https://esm.sh/react@^19.2.4/"
   }
 }
 </script>
 </head>
-<body class="bg-amber-50">
+<body>
   <div id="root"></div>
+
+  <script type="module">
+    import React, { useState, useEffect, useRef, useMemo } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { GoogleGenAI, Modality, Type } from "@google/genai";
+
+    // --- 資料定義 ---
+    const HIRAGANA_A_COLUMN = [
+      { char: 'あ', strokeImg: 'https://raw.githubusercontent.com/nihow79207-wang/japanese-assets/main/あ.png' },
+      { char: 'い', strokeImg: 'https://raw.githubusercontent.com/nihow79207-wang/japanese-assets/main/い.png' },
+      { char: 'う', strokeImg: 'https://raw.githubusercontent.com/nihow79207-wang/japanese-assets/main/う.png' },
+      { char: 'え', strokeImg: 'https://raw.githubusercontent.com/nihow79207-wang/japanese-assets/main/え.png' },
+      { char: 'お', strokeImg: 'https://raw.githubusercontent.com/nihow79207-wang/japanese-assets/main/お.png' }
+    ];
+
+    const FRUIT_A = [
+      { id: 'apple', word: 'りんご', emoji: '🍎' },
+      { id: 'grape', word: 'ぶどう', emoji: '🍇' },
+      { id: 'melon', word: 'メロン', emoji: '🍈' },
+      { id: 'orange', word: 'みかん', emoji: '🍊' },
+      { id: 'watermelon', word: 'すいか', emoji: '🍉' }
+    ];
+
+    const FRUIT_B = [
+      { id: 'pineapple', word: 'パイナップル', emoji: '🍍' },
+      { id: 'strawberry', word: 'いちご', emoji: '🍓' },
+      { id: 'kiwi', word: 'キウイ', emoji: '🥝' },
+      { id: 'lemon', word: 'レモン', emoji: '🍋' },
+      { id: 'banana', word: 'バナナ', emoji: '🍌' }
+    ];
+
+    // --- AI 服務 ---
+    const audioCache = new Map();
+    let audioContext = null;
+
+    const playTTS = async (text) => {
+      // 優先使用瀏覽器 API 確保即時性
+      const ut = new SpeechSynthesisUtterance(text);
+      ut.lang = 'ja-JP';
+      ut.rate = 0.9;
+      window.speechSynthesis.speak(ut);
+
+      // 非同步嘗試使用 Gemini 高品質音訊 (如果 API Key 存在)
+      if (process.env.API_KEY) {
+        try {
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash-preview-tts",
+            contents: `Say '${text}'`,
+            config: {
+              responseModalities: [Modality.AUDIO],
+              speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } }
+            }
+          });
+          const base64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          if (base64) {
+            if (!audioContext) audioContext = new AudioContext();
+            const buffer = await audioContext.decodeAudioData(Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer);
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioContext.destination);
+            source.start(0);
+          }
+        } catch (e) { console.warn("Gemini TTS skip", e); }
+      }
+    };
+
+    const verifyHandwriting = async (base64Image, target) => {
+      if (!process.env.API_KEY) return { isCorrect: true, feedback: "寫得真棒！" };
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: {
+          parts: [
+            { text: `Is this handwritten Japanese character '${target}'? Response JSON: {isCorrect: boolean, feedback: string}` },
+            { inlineData: { data: base64Image.split(',')[1], mimeType: 'image/png' } }
+          ]
+        },
+        config: { responseMimeType: "application/json" }
+      });
+      return JSON.parse(response.text);
+    };
+
+    const verifyPronunciation = async (audioBase64, target) => {
+      if (!process.env.API_KEY) return { isCorrect: true, feedback: "發音正確！" };
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: {
+          parts: [
+            { text: `Did the user say '${target}' correctly? JSON: {isCorrect: boolean, feedback: string}` },
+            { inlineData: { data: audioBase64, mimeType: 'audio/webm' } }
+          ]
+        },
+        config: { responseMimeType: "application/json" }
+      });
+      return JSON.parse(response.text);
+    };
+
+    // --- 元件：畫板 ---
+    const CanvasBoard = ({ targetChar, onClear, onSubmit, isVerifying }) => {
+      const canvasRef = useRef(null);
+      const [isDrawing, setIsDrawing] = useState(false);
+      const [hasDrawn, setHasDrawn] = useState(false);
+
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(200, 0); ctx.lineTo(200, 400); ctx.moveTo(0, 200); ctx.lineTo(400, 200); ctx.stroke();
+        ctx.strokeStyle = '#0284c7'; ctx.lineWidth = 15; ctx.lineCap = 'round';
+        setHasDrawn(false);
+      }, [targetChar]);
+
+      const getPos = (e) => {
+        const rect = canvasRef.current.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return { x: clientX - rect.left, y: clientY - rect.top };
+      };
+
+      const draw = (e) => {
+        if (!isDrawing || isVerifying) return;
+        const ctx = canvasRef.current.getContext('2d');
+        const { x, y } = getPos(e);
+        ctx.lineTo(x, y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x, y);
+      };
+
+      return (
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative bg-white p-2 rounded-3xl shadow-2xl border-4 border-sky-100">
+            <canvas ref={canvasRef} width={400} height={400} className="pencil-cursor touch-none"
+              onMouseDown={(e) => { setIsDrawing(true); setHasDrawn(true); draw(e); }}
+              onMouseMove={draw} onMouseUp={() => setIsDrawing(false)}
+              onTouchStart={(e) => { setIsDrawing(true); setHasDrawn(true); draw(e); }}
+              onTouchMove={draw} onTouchEnd={() => setIsDrawing(false)}
+            />
+            {isVerifying && <div className="absolute inset-0 bg-white/60 flex items-center justify-center text-2xl font-black text-sky-600 animate-pulse">批改中...</div>}
+          </div>
+          <div className="flex gap-4">
+            <button onClick={() => { onClear(); canvasRef.current.getContext('2d').clearRect(0,0,400,400); }} className="px-8 py-3 bg-gray-200 rounded-full font-bold">清除</button>
+            <button onClick={() => hasDrawn && onSubmit(canvasRef.current.toDataURL())} className="px-12 py-3 bg-sky-500 text-white rounded-full font-bold shadow-lg">送出</button>
+          </div>
+        </div>
+      );
+    };
+
+    // --- 主程式 ---
+    const App = () => {
+      const [screen, setScreen] = useState('home');
+      const [coins, setCoins] = useState(0);
+      
+      // 狀態集
+      const [charStates, setCharStates] = useState({});
+      const [gameTargets, setGameTargets] = useState([]);
+      const [currentIndex, setCurrentIndex] = useState(0);
+      const [feedback, setFeedback] = useState(null);
+      const [isVerifying, setIsVerifying] = useState(false);
+      const [isRecording, setIsRecording] = useState(false);
+      const recorderRef = useRef(null);
+
+      // 五十音流程
+      const startHiragana = () => {
+        const initial = {};
+        HIRAGANA_A_COLUMN.forEach(c => initial[c.char] = 'normal');
+        setCharStates(initial);
+        setScreen('learning');
+      };
+
+      const handleCharClick = (char) => {
+        const s = charStates[char];
+        if (s === 'done') return;
+        playTTS(char);
+        if (s === 'normal') setCharStates(p => ({...p, [char]: 'flipped'}));
+        else setCharStates(p => ({...p, [char]: 'done'}));
+      };
+
+      useEffect(() => {
+        if (screen === 'learning' && HIRAGANA_A_COLUMN.every(c => charStates[c.char] === 'done')) {
+          setTimeout(() => {
+            const shuffled = [...HIRAGANA_A_COLUMN].sort(() => Math.random() - 0.5);
+            setGameTargets(shuffled); setCurrentIndex(0); setScreen('game1');
+            playTTS(shuffled[0].char);
+          }, 800);
+        }
+      }, [charStates, screen]);
+
+      // 單字流程
+      const startVocab = (set) => {
+        setGameTargets(set);
+        const initial = {}; set.forEach(v => initial[v.id] = 'normal');
+        setCharStates(initial);
+        setScreen('vocab_learning');
+      };
+
+      const handleVocabClick = (v) => {
+        const s = charStates[v.id];
+        if (s === 'done') return;
+        playTTS(v.word);
+        if (s === 'normal') setCharStates(p => ({...p, [v.id]: 'flipped'}));
+        else setCharStates(p => ({...p, [v.id]: 'done'}));
+      };
+
+      useEffect(() => {
+        if (screen === 'vocab_learning' && gameTargets.length > 0 && gameTargets.every(v => charStates[v.id] === 'done')) {
+          setTimeout(() => {
+            setScreen('vocab_game1'); setCurrentIndex(0);
+            playTTS(gameTargets[0].word);
+          }, 800);
+        }
+      }, [charStates, screen]);
+
+      // 遊戲一邏輯 (聽音選字/選圖)
+      const handleSelect = (val, isChar = true) => {
+        const target = isChar ? gameTargets[currentIndex].char : gameTargets[currentIndex].id;
+        if (val === target) {
+          playTTS('正解！'); setFeedback('correct');
+          setTimeout(() => {
+            setFeedback(null);
+            if (currentIndex + 1 < gameTargets.length) {
+              setCurrentIndex(i => i + 1);
+              playTTS(isChar ? gameTargets[currentIndex+1].char : gameTargets[currentIndex+1].word);
+            } else {
+              setScreen(isChar ? 'game2' : 'vocab_game2');
+              setCurrentIndex(0);
+              playTTS(isChar ? gameTargets[0].char : gameTargets[0].word);
+            }
+          }, 1000);
+        } else {
+          playTTS('残念'); setFeedback('wrong');
+          setTimeout(() => setFeedback(null), 800);
+        }
+      };
+
+      // 錄音邏輯
+      const toggleRecording = async () => {
+        if (isRecording) {
+          recorderRef.current.stop();
+          setIsRecording(false);
+        } else {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const recorder = new MediaRecorder(stream);
+            const chunks = [];
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = async () => {
+              const blob = new Blob(chunks, { type: 'audio/webm' });
+              const base64 = await new Promise(r => {
+                const reader = new FileReader();
+                reader.onloadend = () => r(reader.result.split(',')[1]);
+                reader.readAsDataURL(blob);
+              });
+              setIsVerifying(true);
+              const res = await verifyPronunciation(base64, gameTargets[currentIndex].word);
+              setIsVerifying(false);
+              if (res.isCorrect) {
+                setFeedback({ text: res.feedback, type: 'success' });
+                playTTS('素晴らしい');
+                setTimeout(() => {
+                  setFeedback(null);
+                  if (currentIndex + 1 < gameTargets.length) setCurrentIndex(i => i + 1);
+                  else {
+                    setCoins(c => {
+                      const nc = c + 1;
+                      setScreen(nc >= 2 ? 'story' : 'vocab_story');
+                      return nc;
+                    });
+                  }
+                }, 2000);
+              } else {
+                setFeedback({ text: res.feedback, type: 'error' });
+                playTTS('惜しい');
+              }
+            };
+            recorder.start();
+            recorderRef.current = recorder;
+            setIsRecording(true);
+          } catch (e) { alert("請允許麥克風權限！"); }
+        }
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-4">
+          {/* Header */}
+          {screen !== 'home' && (
+            <div className="fixed top-0 w-full p-4 flex justify-between z-50">
+              <button onClick={() => setScreen('home')} className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center text-white text-2xl shadow-lg">🏠</button>
+              <div className="bg-white/90 px-6 py-2 rounded-full border-2 border-amber-200 shadow-md flex items-center gap-2">
+                <span className="text-xl">💰</span><span className="text-xl font-black text-amber-600">{coins}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Screens */}
+          {screen === 'home' && (
+            <div className="text-center animate-scale-up">
+              <h1 className="text-8xl font-black text-sky-500 mb-4 rounded-font drop-shadow-lg">日文一起學</h1>
+              <p className="text-2xl text-amber-600 mb-12 font-bold italic">Happy Learning Adventure!</p>
+              <button onClick={() => setScreen('instructions')} className="px-16 py-8 bg-yellow-400 text-white text-4xl font-bold rounded-full shadow-[0_10px_0_#d97706] active:translate-y-[10px] transition-all">開始冒險</button>
+            </div>
+          )}
+
+          {screen === 'instructions' && (
+            <div className="max-w-2xl bg-white p-12 rounded-[3rem] shadow-2xl border-8 border-yellow-200 text-center animate-scale-up">
+              <h2 className="text-4xl font-bold text-sky-500 mb-8">冒險指南</h2>
+              <div className="space-y-4 text-2xl font-bold text-amber-800 text-left">
+                <p>⭐ 完成「五十音」或「單字」課程</p>
+                <p>💰 獲得金幣，解鎖傳說故事</p>
+              </div>
+              <button onClick={() => setScreen('menu')} className="mt-10 px-16 py-4 bg-sky-500 text-white text-3xl rounded-full shadow-lg">出發！</button>
+            </div>
+          )}
+
+          {screen === 'menu' && (
+            <div className="w-full max-w-5xl text-center animate-scale-up">
+              <h2 className="text-5xl font-black text-sky-600 mb-16">選擇任務</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                <button onClick={startHiragana} className="bg-white p-12 rounded-[4rem] shadow-2xl border-4 border-sky-100 hover:scale-105 transition">
+                  <div className="text-9xl mb-8">あ</div>
+                  <span className="text-4xl font-black text-sky-500">五十音</span>
+                </button>
+                <button onClick={() => setScreen('vocab_menu')} className="bg-white p-12 rounded-[4rem] shadow-2xl border-4 border-teal-100 hover:scale-105 transition">
+                  <div className="text-9xl mb-8">🍎</div>
+                  <span className="text-4xl font-black text-teal-500">單字館</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {screen === 'learning' && (
+            <div className="flex flex-col items-center animate-scale-up">
+              <h2 className="text-4xl font-black text-sky-600 mb-12 bg-white px-8 py-4 rounded-full shadow-md">學習：五十音</h2>
+              <div className="flex flex-wrap justify-center gap-10">
+                {HIRAGANA_A_COLUMN.map(c => (
+                  <div key={c.char} onClick={() => handleCharClick(c.char)} className={`perspective-1000 w-48 h-48 cursor-pointer ${charStates[c.char] === 'done' ? 'animate-shrink' : ''}`}>
+                    <div className={`relative w-full h-full preserve-3d transition-all duration-500 ${charStates[c.char] !== 'normal' ? 'rotate-y-180' : ''}`}>
+                      <div className="absolute inset-0 backface-hidden flex items-center justify-center bg-sky-400 text-white text-9xl font-bold rounded-full border-8 border-sky-300">{c.char}</div>
+                      <div className="absolute inset-0 backface-hidden rotate-y-180 flex items-center justify-center bg-white rounded-full border-8 border-pink-300 overflow-hidden p-6"><img src={c.strokeImg} className="w-full h-full object-contain" /></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {screen === 'game1' && (
+            <div className="text-center animate-scale-up">
+              <div className="bg-sky-500 text-white px-10 py-4 rounded-full text-3xl font-black mb-12">聽音選字 ({currentIndex + 1}/5)</div>
+              <button onClick={() => playTTS(gameTargets[currentIndex].char)} className="w-32 h-32 bg-sky-400 rounded-full flex items-center justify-center shadow-2xl mx-auto mb-16 animate-pulse text-6xl text-white">🔊</button>
+              <div className="flex flex-wrap justify-center gap-6">
+                {HIRAGANA_A_COLUMN.map(c => (
+                  <button key={c.char} onClick={() => handleSelect(c.char)} className={`w-32 h-32 rounded-full text-5xl font-bold border-4 transition-all shadow-xl ${feedback === 'correct' && c.char === gameTargets[currentIndex].char ? 'bg-green-500 text-white border-green-200' : 'bg-white text-sky-500 border-sky-100 hover:bg-sky-50'}`}>{c.char}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {screen === 'game2' && (
+            <div className="animate-scale-up text-center">
+              <div className="bg-purple-500 text-white px-10 py-4 rounded-full text-3xl font-black mb-8">寫字練習 ({currentIndex+1}/5)</div>
+              <div className="mb-4 flex items-center justify-center gap-6"><span className="text-9xl font-black text-gray-200/50">{gameTargets[currentIndex].char}</span></div>
+              <CanvasBoard targetChar={gameTargets[currentIndex].char} onClear={() => setFeedback(null)} isVerifying={isVerifying} onSubmit={async (img) => {
+                setIsVerifying(true); const res = await verifyHandwriting(img, gameTargets[currentIndex].char); setIsVerifying(false);
+                if (res.isCorrect) {
+                  setFeedback({ text: res.feedback, type: 'success' }); playTTS('素晴らしい');
+                  setTimeout(() => {
+                    setFeedback(null);
+                    if (currentIndex+1 < gameTargets.length) setCurrentIndex(i => i + 1);
+                    else setCoins(c => { const nc = c+1; setScreen(nc >= 2 ? 'story' : 'menu'); return nc; });
+                  }, 2000);
+                } else { setFeedback({ text: res.feedback, type: 'error' }); playTTS('惜しい'); }
+              }} />
+              {feedback && <div className={`mt-4 px-8 py-3 rounded-2xl text-2xl font-bold ${feedback.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{feedback.text}</div>}
+            </div>
+          )}
+
+          {screen === 'vocab_menu' && (
+            <div className="text-center animate-scale-up">
+              <h2 className="text-7xl font-black text-teal-600 mb-12">單字大冒險</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                <button onClick={() => startVocab(FRUIT_A)} className="bg-white p-10 rounded-[3rem] shadow-xl border-8 border-white flex gap-6 hover:scale-105 transition">
+                  <div className="text-8xl">🍎</div><div className="text-left font-black text-4xl text-teal-700">水果A<div className="text-xl text-gray-400">Apple, Grape...</div></div>
+                </button>
+                <button onClick={() => startVocab(FRUIT_B)} className="bg-white p-10 rounded-[3rem] shadow-xl border-8 border-white flex gap-6 hover:scale-105 transition">
+                  <div className="text-8xl">🍍</div><div className="text-left font-black text-4xl text-teal-700">水果B<div className="text-xl text-gray-400">Banana, Kiwi...</div></div>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {screen === 'vocab_learning' && (
+            <div className="animate-scale-up text-center">
+              <h2 className="text-4xl font-black text-teal-600 mb-12">水果點點名</h2>
+              <div className="flex flex-wrap justify-center gap-10">
+                {gameTargets.map(v => (
+                  <div key={v.id} onClick={() => handleVocabClick(v)} className={`perspective-1000 w-56 h-56 cursor-pointer ${charStates[v.id] === 'done' ? 'animate-shrink' : ''}`}>
+                    <div className={`relative w-full h-full preserve-3d transition-all duration-700 ${charStates[v.id] !== 'normal' ? 'rotate-y-180' : ''}`}>
+                      <div className="absolute inset-0 backface-hidden flex items-center justify-center bg-white rounded-full border-8 border-teal-50 shadow-xl text-[10rem]">{v.emoji}</div>
+                      <div className="absolute inset-0 backface-hidden rotate-y-180 flex flex-col items-center justify-center bg-teal-50 rounded-full border-8 border-teal-300 shadow-xl">
+                        <span className="text-9xl">{v.emoji}</span><span className="text-4xl font-black text-teal-700">{v.word}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {screen === 'vocab_game1' && (
+            <div className="text-center animate-scale-up">
+              <div className="bg-teal-500 text-white px-10 py-4 rounded-full text-3xl font-black mb-12 shadow-lg inline-block">聽音選圖 ({currentIndex + 1}/5)</div>
+              <button onClick={() => playTTS(gameTargets[currentIndex].word)} className="w-32 h-32 bg-sky-400 rounded-full flex items-center justify-center shadow-2xl mx-auto mb-16 animate-pulse text-6xl text-white">🔊</button>
+              <div className="flex flex-wrap justify-center gap-8">
+                {gameTargets.map(v => (
+                  <button key={v.id} onClick={() => handleSelect(v.id, false)} className={`w-44 h-44 rounded-full bg-white text-9xl flex items-center justify-center border-8 transition-all shadow-xl ${feedback === 'correct' && v.id === gameTargets[currentIndex].id ? 'border-green-500 scale-110' : 'border-white hover:border-teal-300'}`}>{v.emoji}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {screen === 'vocab_game2' && (
+            <div className="text-center animate-scale-up">
+              <div className="bg-indigo-500 text-white px-10 py-4 rounded-full text-3xl font-black mb-12 shadow-lg inline-block">大聲唸出來</div>
+              <div className="bg-white p-12 rounded-[4rem] shadow-2xl border-8 border-indigo-100 flex flex-col items-center gap-8">
+                <span className="text-[12rem] leading-none">{gameTargets[currentIndex].emoji}</span>
+                <p className="text-7xl font-black text-indigo-600">{gameTargets[currentIndex].word}</p>
+                <button onMouseDown={toggleRecording} onTouchStart={toggleRecording} onMouseUp={toggleRecording} onTouchEnd={toggleRecording} 
+                  className={`w-32 h-32 rounded-full flex items-center justify-center text-5xl text-white shadow-2xl transition-all ${isRecording ? 'bg-red-500 animate-ping' : 'bg-indigo-500'}`}>
+                  {isRecording ? '⏹️' : '🎤'}
+                </button>
+                <p className="text-xl text-gray-400 font-bold">{isRecording ? '錄音中...' : '按住麥克風並開口唸唸看'}</p>
+                {isVerifying && <div className="text-3xl font-black text-indigo-500 animate-pulse">批改中...</div>}
+                {feedback && <div className={`px-10 py-5 rounded-3xl text-3xl font-black ${feedback.type === 'success' ? 'bg-green-100 text-green-700 border-4 border-green-200' : 'bg-red-100 text-red-700 border-4 border-red-200'}`}>{feedback.text}</div>}
+              </div>
+            </div>
+          )}
+
+          {screen === 'vocab_story' && (
+            <div className="w-full max-w-4xl bg-white p-16 rounded-[4rem] shadow-2xl border-y-[12px] border-teal-400 animate-scale-up text-center">
+              <div className="text-9xl mb-8">🐓</div>
+              <h2 className="text-5xl font-black text-teal-600 mb-8">日文豆知識：鳥居</h2>
+              <div className="space-y-6 text-2xl text-gray-700 font-bold leading-relaxed">
+                <p>神社的「鳥居」，其實跟<span className="text-pink-500 text-4xl">「雞」</span>有關！</p>
+                <div className="bg-teal-50 p-8 rounded-3xl border-l-8 border-teal-300 text-left">
+                  傳說太陽女神躲進山洞，眾神便讓公雞在架子上啼叫，引誘她出來。所以鳥居原意是「讓雞站的地方」喔！
+                </div>
+              </div>
+              <button onClick={() => setScreen('menu')} className="mt-12 w-full py-6 bg-teal-500 text-white text-3xl font-black rounded-full">再去拿一枚金幣吧！</button>
+            </div>
+          )}
+
+          {screen === 'story' && (
+            <div className="w-full max-w-4xl bg-white p-16 rounded-[5rem] shadow-2xl border-x-[16px] border-yellow-300 animate-scale-up text-center relative">
+              <div className="text-[10rem] mb-8 animate-bounce-subtle">🌟</div>
+              <h2 className="text-6xl font-black text-amber-600 mb-12 leading-tight">究極獎勵故事：<br/>樹勾衣餒！</h2>
+              <div className="space-y-10 text-3xl text-gray-700 font-bold leading-loose">
+                <p>有一天小明跟朋友去樹下野餐，衣服不小心被樹枝勾住了...</p>
+                <p>他指著勾住的地方，跟朋友大聲驚呼：</p>
+                <p className="text-7xl font-black text-sky-500 py-10 bg-sky-50 rounded-[3rem] tracking-widest shadow-inner">「 樹 勾 衣 餒 ！ 」</p>
+                <div className="text-xl text-amber-400 font-black italic">( すごいね - Sugoi ne! 日本語：好厲害喔！ )</div>
+                <p className="text-amber-600">恭喜你完成所有冒險！你真的太「樹勾衣餒」了！</p>
+              </div>
+              <button onClick={() => { setScreen('home'); setCoins(0); }} className="mt-16 w-full py-8 bg-amber-500 text-white text-4xl font-black rounded-full shadow-[0_12px_0_#d97706] active:translate-y-2">重新開始大冒險</button>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
 </body>
 </html>
